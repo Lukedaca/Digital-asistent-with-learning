@@ -1,0 +1,129 @@
+import random
+import datetime
+import json
+from collections import defaultdict
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+class ChytraAsistentka:
+    def __init__(self, jmeno="Eva"):
+        self.jmeno = jmeno
+        self.pozdravy = [
+            f"Ahoj, já jsem {self.jmeno}!",
+            f"Zdravím, jak vám mohu pomoci?",
+            f"Vítejte! Jsem {self.jmeno}, vaše digitální asistentka."
+        ]
+        # Znalostní báze pro učení
+        self.znalostni_baze = defaultdict(list)
+        self.historie_konverzace = []
+        self.vectorizer = TfidfVectorizer()
+        self.load_knowledge()
+        
+    def load_knowledge(self):
+        """Načte existující znalosti ze souboru"""
+        try:
+            with open('znalosti.json', 'r', encoding='utf-8') as f:
+                saved_data = json.load(f)
+                self.znalostni_baze.update(saved_data)
+        except FileNotFoundError:
+            print("Vytvářím novou znalostní bázi...")
+    
+    def save_knowledge(self):
+        """Uloží naučené znalosti do souboru"""
+        with open('znalosti.json', 'w', encoding='utf-8') as f:
+            json.dump(dict(self.znalostni_baze), f, ensure_ascii=False, indent=2)
+    
+    def learn_from_interaction(self, dotaz, odpoved, zpetna_vazba):
+        """Učí se z interakce s uživatelem"""
+        if zpetna_vazba > 0:  # Pozitivní zpětná vazba
+            self.znalostni_baze[dotaz.lower()].append({
+                'odpoved': odpoved,
+                'score': zpetna_vazba,
+                'pouziti': 1
+            })
+            self.save_knowledge()
+    
+    def find_similar_question(self, dotaz):
+        """Najde podobnou otázku ve znalostní bázi"""
+        if not self.znalostni_baze:
+            return None
+            
+        questions = list(self.znalostni_baze.keys())
+        tfidf_matrix = self.vectorizer.fit_transform([dotaz] + questions)
+        similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:])[0]
+        
+        max_sim_idx = np.argmax(similarities)
+        if similarities[max_sim_idx] > 0.7:  # Práh podobnosti
+            return questions[max_sim_idx]
+        return None
+    
+    def get_best_response(self, similar_question):
+        """Vybere nejlepší odpověď na základě skóre a počtu použití"""
+        if not similar_question:
+            return None
+            
+        responses = self.znalostni_baze[similar_question]
+        if not responses:
+            return None
+            
+        # Vážené skóre podle hodnocení a počtu použití
+        best_response = max(responses, 
+                          key=lambda x: (x['score'] * 0.7 + x['pouziti'] * 0.3))
+        best_response['pouziti'] += 1
+        return best_response['odpoved']
+    
+    def odpoved_na_dotaz(self, dotaz):
+        dotaz = dotaz.lower()
+        
+        # Základní odpovědi
+        if "čas" in dotaz:
+            return self.get_cas()
+        elif "datum" in dotaz:
+            return self.get_datum()
+        
+        # Hledání podobné otázky
+        similar_question = self.find_similar_question(dotaz)
+        if similar_question:
+            best_response = self.get_best_response(similar_question)
+            if best_response:
+                return best_response
+        
+        # Fallback odpověď
+        return "Toto je pro mě nová otázka. Můžete mi pomoci se naučit správnou odpověď?"
+    
+    def get_cas(self):
+        now = datetime.datetime.now()
+        return f"Aktuální čas je {now.strftime('%H:%M')}"
+    
+    def get_datum(self):
+        now = datetime.datetime.now()
+        return f"Dnešní datum je {now.strftime('%d.%m.%Y')}"
+
+def main():
+    asistentka = ChytraAsistentka()
+    print(f"\n{'='*50}")
+    print("Chytrá Asistentka Demo")
+    print(f"{'='*50}\n")
+    print(random.choice(asistentka.pozdravy))
+    
+    while True:
+        dotaz = input("\nVáš dotaz (pro ukončení napište 'konec'): ")
+        if dotaz.lower() == 'konec':
+            print("\nDěkuji za rozhovor! Mějte hezký den.")
+            break
+        
+        odpoved = asistentka.odpoved_na_dotaz(dotaz)
+        print(f"\n{asistentka.jmeno}: {odpoved}")
+        
+        # Učení
+        if "?" in odpoved:  # Pokud asistentka neznala odpověď
+            print("\nChcete mě naučit správnou odpověď? (ano/ne)")
+            if input().lower() == 'ano':
+                print("Jaká by měla být správná odpověď?")
+                nova_odpoved = input()
+                asistentka.learn_from_interaction(dotaz, nova_odpoved, 1)
+                print("Děkuji! Příště už budu vědět, jak odpovědět.")
+
+if __name__ == "__main__":
+    main()
